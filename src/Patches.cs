@@ -1,20 +1,21 @@
 namespace AccLineChart;
 
-[HarmonyPatch(typeof(TaskStageTarget), "InvokeJudgeEvent")]
-internal static class TaskStageTargetInvokeJudgeEventPatch
+/// <summary>Per-note callbacks (the same two hooks Info+ uses) drive miss/marker detection.</summary>
+[HarmonyPatch(typeof(BattleEnemyManager), "SetPlayResult")]
+internal static class BattleEnemyManagerSetPlayResultPatch
 {
-    private static void Postfix(TaskStageTarget __instance, uint result)
+    private static void Postfix(int idx, byte result)
     {
-        RunRecorder.OnJudge(__instance, result);
+        RunRecorder.OnNoteResult(idx, result);
     }
 }
 
-[HarmonyPatch(typeof(TaskStageTarget), "AddScore")]
-internal static class TaskStageTargetAddScorePatch
+[HarmonyPatch(typeof(Il2CppGameLogic.GameMissPlay), "MissCube")]
+internal static class GameMissPlayMissCubePatch
 {
-    private static void Postfix(int id, string noteType, bool isAir, float time)
+    private static void Postfix(int idx)
     {
-        RunRecorder.OnNoteScored(id, noteType, isAir, time);
+        RunRecorder.OnMissCube(idx);
     }
 }
 
@@ -28,6 +29,7 @@ internal static class PnlVictoryOnVictoryPatch
 {
     private static void Postfix(Il2Cpp.PnlVictory __instance)
     {
+        RunRecorder.FinalizeResults();
         ChartWindow.ShowResults();
     }
 }

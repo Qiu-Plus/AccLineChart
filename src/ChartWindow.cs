@@ -77,7 +77,7 @@ internal static class ChartWindow
             }
 
             _visible = true;
-            Logger.Msg($"[ChartWindow] results shown, samples={RunRecorder.Self?.Samples.Count ?? 0}, totalNotes={RunRecorder.TotalNotes}");
+            Logger.Msg($"[ChartWindow] results shown, samples={RunRecorder.Self?.Samples.Count ?? 0}, totalNotes={RunRecorder.TotalUnits}");
         }
         catch (Exception ex)
         {
@@ -552,7 +552,6 @@ internal static class ChartWindow
         }
 
         var series = RunRecorder.Series;
-        int total = RunRecorder.EffectiveTotal;
         bool hasSamples = false;
         float minAcc = 100f;
         float maxTime = 1f;
@@ -562,7 +561,7 @@ internal static class ChartWindow
             foreach (var sample in player.Samples)
             {
                 hasSamples = true;
-                minAcc = Math.Min(minAcc, RunRecorder.AccuracyOf(sample, total));
+                minAcc = Math.Min(minAcc, sample.Acc);
                 maxTime = Math.Max(maxTime, sample.Time);
             }
         }
@@ -632,7 +631,7 @@ internal static class ChartWindow
 
         foreach (var player in series)
         {
-            DrawSeries(player, plot, yMin, yMax, maxTime, total);
+            DrawSeries(player, plot, yMin, yMax, maxTime);
         }
     }
 
@@ -658,7 +657,7 @@ internal static class ChartWindow
         return 10f * magnitude;
     }
 
-    private static void DrawSeries(PlayerSeries player, Rect plot, float yMin, float yMax, float maxTime, int total)
+    private static void DrawSeries(PlayerSeries player, Rect plot, float yMin, float yMax, float maxTime)
     {
         var samples = player.Samples;
         if (samples.Count == 0)
@@ -674,7 +673,7 @@ internal static class ChartWindow
             for (int i = 0; i <= steps; i++)
             {
                 float frac = i / (float)steps;
-                float acc = SampleAccAt(player, frac * maxTime, total);
+                float acc = SampleAccAt(player, frac * maxTime);
                 float y = MapY(acc, plot, yMin, yMax);
                 DrawRect(new Rect(plot.x + frac * plot.width, y, 2.6f, plot.yMax - y), fillColor);
             }
@@ -690,7 +689,7 @@ internal static class ChartWindow
         foreach (var sample in samples)
         {
             float x = plot.x + plot.width * Math.Clamp(sample.Time / maxTime, 0f, 1f);
-            var point = new Vector2(x, MapY(RunRecorder.AccuracyOf(sample, total), plot, yMin, yMax));
+            var point = new Vector2(x, MapY(sample.Acc, plot, yMin, yMax));
             if (hasPrev)
             {
                 DrawLine(prevGlow, point, glow, player.IsSelf ? 6f : 5f);
@@ -706,7 +705,7 @@ internal static class ChartWindow
         foreach (var sample in samples)
         {
             float x = plot.x + plot.width * Math.Clamp(sample.Time / maxTime, 0f, 1f);
-            var point = new Vector2(x, MapY(RunRecorder.AccuracyOf(sample, total), plot, yMin, yMax));
+            var point = new Vector2(x, MapY(sample.Acc, plot, yMin, yMax));
             if (hasPrev)
             {
                 DrawLine(prev, point, player.Color, player.IsSelf ? 2.2f : 1.6f);
@@ -728,7 +727,7 @@ internal static class ChartWindow
         foreach (var sample in samples)
         {
             float x = plot.x + plot.width * Math.Clamp(sample.Time / maxTime, 0f, 1f);
-            var point = new Vector2(x, MapY(RunRecorder.AccuracyOf(sample, total), plot, yMin, yMax));
+            var point = new Vector2(x, MapY(sample.Acc, plot, yMin, yMax));
 
             if (sample.IsGreat)
             {
@@ -747,7 +746,7 @@ internal static class ChartWindow
         }
     }
 
-    private static float SampleAccAt(PlayerSeries player, float time, int total)
+    private static float SampleAccAt(PlayerSeries player, float time)
     {
         var samples = player.Samples;
         if (samples.Count == 0)
@@ -755,7 +754,6 @@ internal static class ChartWindow
             return 100f;
         }
 
-        float firstAcc = RunRecorder.AccuracyOf(samples[0], total);
         if (time <= samples[0].Time)
         {
             return 100f;
@@ -769,13 +767,13 @@ internal static class ChartWindow
                 var b = samples[i];
                 float span = b.Time - a.Time;
                 float t = span <= 0.0001f ? 0f : (time - a.Time) / span;
-                float accA = RunRecorder.AccuracyOf(a, total);
-                float accB = RunRecorder.AccuracyOf(b, total);
+                float accA = a.Acc;
+                float accB = b.Acc;
                 return accA + (accB - accA) * t;
             }
         }
 
-        return RunRecorder.AccuracyOf(samples[^1], total);
+        return samples[^1].Acc;
     }
 
     private static void DrawSidebar(Rect card)
@@ -804,7 +802,7 @@ internal static class ChartWindow
             contentX += 18f;
 
             GUI.Label(new Rect(contentX, row.y, row.width - (contentX - row.x) - 68f, 28f), player.Name, _textStyle);
-            GUI.Label(new Rect(row.xMax - 66f, row.y, 66f, 28f), $"{player.FinalAcc(RunRecorder.EffectiveTotal):0.00}%", _rightStyle);
+            GUI.Label(new Rect(row.xMax - 66f, row.y, 66f, 28f), $"{player.FinalAcc:0.00}%", _rightStyle);
             y += 30f;
         }
 

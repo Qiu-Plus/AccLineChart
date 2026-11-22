@@ -52,6 +52,8 @@ internal class Main : MelonMod
                 ChartWindow.ToggleDebug();
             }
 
+            RunRecorder.Poll();
+
 
             // Developer-only helpers, off unless DebugLog is enabled in the config file.
             if (!SettingManager.DebugLog)
