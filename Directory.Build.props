@@ -1,0 +1,9 @@
+<Project>
+    <!-- 构建时 MuseDash.Mod.Sdk 会自动在 Steam 库中查找 Muse Dash；
+         找不到时可用 MD_DIRECTORY 环境变量或 AccuracyChart.csproj.user 里的 GameFolder 指定。 -->
+    <PropertyGroup>
+        <UseArtifactsOutput>true</UseArtifactsOutput>
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+</Project>

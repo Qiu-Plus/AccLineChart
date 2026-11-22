@@ -1,0 +1,9 @@
+global using HarmonyLib;
+global using MelonLoader;
+global using MelonLoader.Utils;
+global using static AccLineChart.MelonBuildInfo;
+global using Il2CppAssets.Scripts.GameCore.HostComponent;
+global using Il2CppFormulaBase;
+global using Il2CppPeroPeroGames.GlobalDefines;
+global using UnityEngine;
+global using UnityEngine.UI;
