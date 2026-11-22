@@ -26,9 +26,11 @@ internal class Main : MelonMod
                 case "GameMain":
                     RunRecorder.Begin();
                     ChartWindow.Hide();
+                    ChartWindow.RequestPrewarm();
                     break;
                 case "UISystem_PC":
                     ChartWindow.Hide();
+                    ChartWindow.RequestPrewarm();
                     break;
             }
         }

@@ -51,12 +51,32 @@ internal static class ChartWindow
     private static Font _font;
 
     private static bool _loggedLayout;
+    private static bool _stylesReady;
+    private static bool _stylesDirty;
+    private static bool _prewarmRequested;
+
+    private static long _drawTicks;
+    private static int _perfCount;
+    private static double _perfSum;
+    private static double _perfMax;
+
+    private static readonly List<Vector2> LinePoints = new(2048);
 
     private static Texture2D White => Texture2D.whiteTexture;
 
     internal static bool Visible => _visible;
 
     private static long _lastShowTicks;
+
+    /// <summary>Ask for the styles/font to be resolved again (e.g. once the game fonts are loaded).</summary>
+    internal static void RequestPrewarm()
+    {
+        if (!_visible)
+        {
+            _prewarmRequested = true;
+            _stylesDirty = true;
+        }
+    }
 
     internal static void ShowResults()
     {
@@ -139,24 +159,80 @@ internal static class ChartWindow
 
     internal static void OnGUI()
     {
-        if (!_visible)
-        {
-            return;
-        }
-
         try
         {
-            EnsureInitialized();
-            EnsureStyles();
+            // Build the styles during the very first IMGUI event (usually the main menu), not when
+            // the results screen opens: resolving the CJK font used to cause a one-time hitch there.
+            if (_prewarmRequested && !_visible)
+            {
+                if (_stylesDirty)
+                {
+                    // The first pass may run before the game fonts are loaded (OS font fallback);
+                    // rebuild once when entering a real scene so the game font is picked up.
+                    _titleStyle = null;
+                }
+
+                long styleStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                EnsureInitialized();
+                EnsureStyles();
+                _stylesReady = _titleStyle != null;
+                _stylesDirty = false;
+                _prewarmRequested = false;
+                double styleMs = (System.Diagnostics.Stopwatch.GetTimestamp() - styleStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                Logger.Msg($"[ChartWindow] styles ready in {styleMs:0.0}ms");
+            }
+
+            if (!_stylesReady && _visible)
+            {
+                EnsureInitialized();
+                EnsureStyles();
+                _stylesReady = _titleStyle != null;
+            }
+
+            if (!_visible)
+            {
+                return;
+            }
 
             var e = Event.current;
             HandleInput(e);
+
+            // Everything below only draws: skip it for layout/mouse/input events.
+            if (e.type != EventType.Repaint)
+            {
+                return;
+            }
+
+            _drawTicks = System.Diagnostics.Stopwatch.GetTimestamp();
             Draw();
+            PerfSample((System.Diagnostics.Stopwatch.GetTimestamp() - _drawTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
         }
         catch (Exception ex)
         {
             Logger.Warning($"[ChartWindow] OnGUI failed: {ex}");
             _visible = false;
+        }
+    }
+
+    private static void PerfSample(double ms)
+    {
+        if (!Logger.IsDebug)
+        {
+            return;
+        }
+
+        _perfCount++;
+        _perfSum += ms;
+        if (ms > _perfMax)
+        {
+            _perfMax = ms;
+        }
+
+        if (_perfCount % 120 == 0)
+        {
+            Logger.Msg($"[ChartWindow] draw avg={_perfSum / 120.0:0.00}ms max={_perfMax:0.00}ms");
+            _perfSum = 0;
+            _perfMax = 0;
         }
     }
 
@@ -665,57 +741,90 @@ internal static class ChartWindow
             return;
         }
 
-        // Area fill (self only, subtle)
+        var start = new Vector2(plot.x, MapY(100f, plot, yMin, yMax));
+
+        // Area fill (self only, subtle), sampled every 4 px instead of every pixel.
         if (player.IsSelf)
         {
             var fillColor = new Color(player.Color.r, player.Color.g, player.Color.b, 0.10f);
-            int steps = Mathf.Max(1, (int)(plot.width / 2f));
+            int steps = Mathf.Max(1, (int)(plot.width / 6f));
+            int index = 0;
             for (int i = 0; i <= steps; i++)
             {
                 float frac = i / (float)steps;
-                float acc = SampleAccAt(player, frac * maxTime);
+                float time = frac * maxTime;
+                while (index + 1 < samples.Count && samples[index + 1].Time <= time)
+                {
+                    index++;
+                }
+
+                float acc;
+                if (time <= samples[0].Time)
+                {
+                    acc = 100f;
+                }
+                else if (index + 1 < samples.Count)
+                {
+                    var a = samples[index];
+                    var b = samples[index + 1];
+                    float span = b.Time - a.Time;
+                    float t = span <= 0.0001f ? 0f : (time - a.Time) / span;
+                    acc = a.Acc + (b.Acc - a.Acc) * Mathf.Clamp01(t);
+                }
+                else
+                {
+                    acc = samples[^1].Acc;
+                }
+
                 float y = MapY(acc, plot, yMin, yMax);
-                DrawRect(new Rect(plot.x + frac * plot.width, y, 2.6f, plot.yMax - y), fillColor);
+                DrawRect(new Rect(plot.x + frac * plot.width, y, 6.6f, plot.yMax - y), fillColor);
             }
         }
 
-        // Every series starts at 100% before the first note is judged.
-        var start = new Vector2(plot.x, MapY(100f, plot, yMin, yMax));
-
-        // Glow pass
-        var glow = new Color(player.Color.r, player.Color.g, player.Color.b, 0.16f);
-        Vector2 prevGlow = start;
-        bool hasPrev = true;
-        foreach (var sample in samples)
+        // Down-sample the polyline to at most ~1 point per 1.5 px, so long charts do not turn into
+        // thousands of rotated texture draws per frame.
+        LinePoints.Clear();
+        LinePoints.Add(start);
+        Vector2 last = start;
+        for (int i = 0; i < samples.Count; i++)
         {
+            var sample = samples[i];
             float x = plot.x + plot.width * Math.Clamp(sample.Time / maxTime, 0f, 1f);
             var point = new Vector2(x, MapY(sample.Acc, plot, yMin, yMax));
-            if (hasPrev)
+            float dx = point.x - last.x;
+            float dy = point.y - last.y;
+            if (dx * dx + dy * dy >= 6.25f)
             {
-                DrawLine(prevGlow, point, glow, player.IsSelf ? 6f : 5f);
+                LinePoints.Add(point);
+                last = point;
             }
-
-            hasPrev = true;
-            prevGlow = point;
         }
 
-        // Solid line
-        Vector2 prev = start;
-        hasPrev = true;
-        foreach (var sample in samples)
+        var finalSample = samples[^1];
+        var finalPoint = new Vector2(
+            plot.x + plot.width * Math.Clamp(finalSample.Time / maxTime, 0f, 1f),
+            MapY(finalSample.Acc, plot, yMin, yMax));
+        if ((finalPoint - last).sqrMagnitude > 0.01f)
         {
-            float x = plot.x + plot.width * Math.Clamp(sample.Time / maxTime, 0f, 1f);
-            var point = new Vector2(x, MapY(sample.Acc, plot, yMin, yMax));
-            if (hasPrev)
-            {
-                DrawLine(prev, point, player.Color, player.IsSelf ? 2.2f : 1.6f);
-            }
-
-            hasPrev = true;
-            prev = point;
+            LinePoints.Add(finalPoint);
         }
 
-        // Start point
+        // Glow pass only when the chart is not too dense.
+        if (LinePoints.Count <= 240 && samples.Count <= 900)
+        {
+            var glow = new Color(player.Color.r, player.Color.g, player.Color.b, 0.16f);
+            for (int i = 1; i < LinePoints.Count; i++)
+            {
+                DrawLine(LinePoints[i - 1], LinePoints[i], glow, player.IsSelf ? 6f : 5f);
+            }
+        }
+
+        float thickness = player.IsSelf ? 2.2f : 1.6f;
+        for (int i = 1; i < LinePoints.Count; i++)
+        {
+            DrawLine(LinePoints[i - 1], LinePoints[i], player.Color, thickness);
+        }
+
         DrawCircle(start, 2.6f, new Color(player.Color.r, player.Color.g, player.Color.b, 0.95f));
 
         if (!player.IsSelf)
@@ -723,25 +832,49 @@ internal static class ChartWindow
             return;
         }
 
-        // Great / Miss markers
-        foreach (var sample in samples)
+        // Great / Miss markers. Dense runs use single rectangles instead of multi-row circles.
+        int markerCount = 0;
+        for (int i = 0; i < samples.Count; i++)
         {
+            if (samples[i].IsGreat || samples[i].IsMiss)
+            {
+                markerCount++;
+            }
+        }
+
+        bool simpleMarkers = markerCount > 30;
+        for (int i = 0; i < samples.Count; i++)
+        {
+            var sample = samples[i];
+            if (!sample.IsGreat && !sample.IsMiss)
+            {
+                if (SettingManager.ShowPerfectDots)
+                {
+                    float px = plot.x + plot.width * Math.Clamp(sample.Time / maxTime, 0f, 1f);
+                    var pp = new Vector2(px, MapY(sample.Acc, plot, yMin, yMax));
+                    DrawRect(new Rect(pp.x - 0.7f, pp.y - 0.7f, 1.4f, 1.4f), new Color(1f, 1f, 1f, 0.40f));
+                }
+
+                continue;
+            }
+
             float x = plot.x + plot.width * Math.Clamp(sample.Time / maxTime, 0f, 1f);
             var point = new Vector2(x, MapY(sample.Acc, plot, yMin, yMax));
 
             if (sample.IsGreat)
             {
-                DrawCircle(point, 4.6f, new Color(0f, 0f, 0f, 0.35f));
-                DrawCircle(point, 3.4f, GreatColor);
+                if (simpleMarkers)
+                {
+                    DrawRect(new Rect(point.x - 2f, point.y - 2f, 4f, 4f), GreatColor);
+                }
+                else
+                {
+                    DrawCircle(point, 3.4f, GreatColor);
+                }
             }
-            else if (sample.IsMiss)
+            else
             {
-                DrawCircle(point, 5.2f, new Color(0f, 0f, 0f, 0.35f));
                 DrawDiamond(point, 3.6f, MissColor);
-            }
-            else if (SettingManager.ShowPerfectDots)
-            {
-                DrawCircle(point, 1.4f, new Color(1f, 1f, 1f, 0.40f));
             }
         }
     }
@@ -914,16 +1047,18 @@ internal static class ChartWindow
         DrawRect(new Rect(x + r, y + h - r, w - 2f * r, r), color);
 
         int rows = (int)Mathf.Ceil(r);
-        for (int i = 0; i < rows; i++)
+        int step = Mathf.Max(1, rows / 4);
+        for (int i = 0; i < rows; i += step)
         {
-            float dy = r - (i + 0.5f);
+            float dy = r - (i + step * 0.5f);
             float hw = Mathf.Sqrt(Mathf.Max(0f, r * r - dy * dy));
             float px = r - hw;
+            float chunkH = Mathf.Min(step, rows - i);
 
-            DrawRect(new Rect(x + px, y + i, hw, 1f), color);
-            DrawRect(new Rect(x + w - r, y + i, hw, 1f), color);
-            DrawRect(new Rect(x + px, y + h - 1f - i, hw, 1f), color);
-            DrawRect(new Rect(x + w - r, y + h - 1f - i, hw, 1f), color);
+            DrawRect(new Rect(x + px, y + i, hw, chunkH), color);
+            DrawRect(new Rect(x + w - r, y + i, hw, chunkH), color);
+            DrawRect(new Rect(x + px, y + h - chunkH - i, hw, chunkH), color);
+            DrawRect(new Rect(x + w - r, y + h - chunkH - i, hw, chunkH), color);
         }
     }
 
@@ -949,17 +1084,18 @@ internal static class ChartWindow
         DrawRect(new Rect(x, y + r, 1f, h - 2f * r), color);
         DrawRect(new Rect(x + w - 1f, y + r, 1f, h - 2f * r), color);
 
-        int rows = (int)Mathf.Ceil(r);
-        for (int i = 0; i < rows; i++)
+        int borderRows = (int)Mathf.Ceil(r);
+        int borderStep = Mathf.Max(1, borderRows / 4);
+        for (int i = 0; i < borderRows; i += borderStep)
         {
-            float dy = r - (i + 0.5f);
+            float dy = r - (i + borderStep * 0.5f);
             float hw = Mathf.Sqrt(Mathf.Max(0f, r * r - dy * dy));
             float px = r - hw;
 
-            DrawRect(new Rect(x + px, y + i, 1f, 1f), color);
-            DrawRect(new Rect(x + w - px - 1f, y + i, 1f, 1f), color);
-            DrawRect(new Rect(x + px, y + h - 1f - i, 1f, 1f), color);
-            DrawRect(new Rect(x + w - px - 1f, y + h - 1f - i, 1f, 1f), color);
+            DrawRect(new Rect(x + px, y + i, 1f, Mathf.Min(borderStep, borderRows - i)), color);
+            DrawRect(new Rect(x + w - px - 1f, y + i, 1f, Mathf.Min(borderStep, borderRows - i)), color);
+            DrawRect(new Rect(x + px, y + h - borderStep - i, 1f, Mathf.Min(borderStep, borderRows - i)), color);
+            DrawRect(new Rect(x + w - px - 1f, y + h - borderStep - i, 1f, Mathf.Min(borderStep, borderRows - i)), color);
         }
     }
 
