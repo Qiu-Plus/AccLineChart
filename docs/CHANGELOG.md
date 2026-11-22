@@ -1,5 +1,15 @@
 # 更新日志
 
+## 1.0.4
+
+- 修复没有 Miss 却出现大量红色菱形、并把准度拉低的问题：重写 Miss 判定，按音符类型分别处理
+  - Block：只有 result != 0 才算 Miss
+  - 双押（Mul）：走 SetPlayResult，命中记录 played，未命中延迟到该音符长度后确认
+  - Ghost / Energy / Music / 普通音符：按 MissCube 判定
+  - 长按：只在 SetPlayResult result == 1 时判定，起点记 LongPair
+  - 全部用 objId 去重
+- 准度公式与 Miss 扣分完全对齐 Info+：Rest 会扣掉真实 Miss 与 LongPair；曲线终点与结算页准度一致
+
 ## 1.0.3
 
 - 修复准度曲线与结算页准度不一致：总物量改为按游戏口径统计（可判定音符 + Block/Music/Energy），不再把未判定的音符多算成 Perfect

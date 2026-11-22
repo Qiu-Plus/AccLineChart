@@ -11,7 +11,6 @@ internal sealed class RunSample
     public int Judged;
     public int Perfect;
     public int Great;
-    public int Cool;
     public int Miss;
 
     public bool IsGreat => Judge == TaskResult.Great;
@@ -29,14 +28,22 @@ internal sealed class PlayerSeries
 }
 
 /// <summary>
-/// Collects one run's judgements. The per-frame counters on TaskStageTarget are the source of
-/// truth, and the per-note callbacks (BattleEnemyManager.SetPlayResult / GameMissPlay.MissCube)
-/// are used as cheap triggers so a note is picked up in the very frame it resolves.
-/// The note totals mirror what the game itself counts (Info+ uses the same breakdown): regular
-/// combo notes, block notes, energy notes and music notes.
+/// Collects one run's judgements following Info+'s rules:
+/// - accuracy counters come straight from TaskStageTarget (perfect/great/block/music/energy/red point);
+/// - misses are attributed per note type from GameMissPlay.MissCube and BattleEnemyManager.SetPlayResult
+///   (ghost/energy/music/block/monster/long/double), which avoids counting the false "miss cube"
+///   callbacks the game fires for notes that were actually hit;
+/// - the note total mirrors the game's own denominator (regular combo notes + block + music + energy).
 /// </summary>
 internal static class RunRecorder
 {
+    private const uint TypeBlock = 2;
+    private const uint TypeLong = 3;
+    private const uint TypeGhost = 4;
+    private const uint TypeEnergy = 6;
+    private const uint TypeMusic = 7;
+    private const uint TypeMul = 8;
+
     private static readonly List<PlayerSeries> _series = new();
 
     internal static IReadOnlyList<PlayerSeries> Series => _series;
@@ -60,14 +67,17 @@ internal static class RunRecorder
     private static int _lastMusic;
     private static int _lastEnergy;
     private static int _lastRedPoint;
-    private static int _lastMiss;
     private static int _lastJudged;
-
-    private static int _loggedSamples;
+    private static int _lastMissCount;
 
     private static int _missCount;
-    private static int _lastMissCount;
-    private static readonly HashSet<int> MissedIds = new();
+    private static int _longPair;
+    private static readonly HashSet<int> MissedOids = new();
+    private static readonly HashSet<int> PlayedOids = new();
+    private static readonly List<(int Oid, float DueTime)> PendingMulMisses = new();
+
+    private static int _loggedSamples;
+    private static int _loggedMissEvents;
 
     internal static void Begin()
     {
@@ -86,12 +96,16 @@ internal static class RunRecorder
         TotalUnits = 0;
         _totalHittable = _totalBlock = _totalMusic = _totalEnergy = 0;
 
-        _lastPerfect = _lastGreat = _lastBlock = _lastMusic = _lastEnergy = _lastRedPoint = _lastMiss = 0;
+        _lastPerfect = _lastGreat = _lastBlock = _lastMusic = _lastEnergy = _lastRedPoint = 0;
         _lastJudged = 0;
-        _missCount = 0;
         _lastMissCount = 0;
-        MissedIds.Clear();
+        _missCount = 0;
+        _longPair = 0;
+        MissedOids.Clear();
+        PlayedOids.Clear();
+        PendingMulMisses.Clear();
         _loggedSamples = 0;
+        _loggedMissEvents = 0;
 
         ChartWindow.Hide();
     }
@@ -107,58 +121,9 @@ internal static class RunRecorder
         InGame = false;
     }
 
-    /// <summary>Called from PnlVictory.OnVictory: log the final numbers and keep the shown end
-    /// value identical to the game's own accuracy.</summary>
-    internal static void FinalizeResults()
-    {
-        try
-        {
-            var self = Self;
-            if (self == null || self.Samples.Count == 0)
-            {
-                return;
-            }
-
-            float ours = self.FinalAcc;
-            float game = 0f;
-            try
-            {
-                var task = TaskStageTarget.instance;
-                if (task != null)
-                {
-                    game = task.GetAccuracy() * 100f;
-                }
-            }
-            catch
-            {
-                // ignored
-            }
-
-            Logger.Msg($"[RunRecorder] final ours={ours:0.00} game={game:0.00} total={TotalUnits} judged={_lastJudged} miss={_lastMiss}(evt={_missCount})");
-
-            if (game > 0.01f && Math.Abs(game - ours) > 0.01f)
-            {
-                self.Samples.Add(new RunSample
-                {
-                    Time = ReadSongTime(),
-                    Acc = Math.Clamp(game, 0f, 100f),
-                    Judge = TaskResult.None,
-                    Judged = _lastJudged,
-                    Perfect = _lastPerfect,
-                    Great = _lastGreat,
-                    Miss = _lastMiss,
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning($"[RunRecorder] finalize failed: {ex.Message}");
-        }
-    }
-
     internal static float SongTime => ReadSongTime();
 
-    /// <summary>A note was reported by BattleEnemyManager.SetPlayResult. result == 1 means miss.</summary>
+    /// <summary>BattleEnemyManager.SetPlayResult: per-note result (hits, long misses, double notes).</summary>
     internal static void OnNoteResult(int idx, byte result)
     {
         if (!InGame)
@@ -168,9 +133,51 @@ internal static class RunRecorder
 
         try
         {
-            if (result <= 1 && MissedIds.Add(idx))
+            var stage = StageBattleComponent.instance;
+            MusicData note = null;
+            try
             {
-                _missCount++;
+                note = stage?.GetMusicDataByIdx(idx);
+            }
+            catch
+            {
+                note = null;
+            }
+
+            if (note != null)
+            {
+                uint type = note.noteData.type;
+                int oid = note.objId;
+
+                if (type == TypeMul)
+                {
+                    if (result is 3 or 4)
+                    {
+                        PlayedOids.Add(oid);
+                    }
+                    else if (result <= 1)
+                    {
+                        float length = 1f;
+                        try
+                        {
+                            length = (float)note.configData.length;
+                        }
+                        catch
+                        {
+                            length = 1f;
+                        }
+
+                        PendingMulMisses.Add((oid, ReadSongTime() + Math.Max(0.1f, length)));
+                    }
+                }
+                else if (type == TypeBlock && result == 4)
+                {
+                    PlayedOids.Add(oid);
+                }
+                else if (type == TypeLong && result == 1)
+                {
+                    CountMiss(oid, note.isLongPressStart, $"long result={result}");
+                }
             }
 
             Poll();
@@ -181,7 +188,7 @@ internal static class RunRecorder
         }
     }
 
-    /// <summary>A missed note/ghost was reported by GameMissPlay.MissCube.</summary>
+    /// <summary>GameMissPlay.MissCube: a note/ghost/collectible was missed.</summary>
     internal static void OnMissCube(int idx)
     {
         if (!InGame)
@@ -191,24 +198,79 @@ internal static class RunRecorder
 
         try
         {
-            bool missed = true;
+            var stage = StageBattleComponent.instance;
+            MusicData note = null;
             try
             {
-                var manager = BattleEnemyManager.instance;
-                if (manager != null)
-                {
-                    byte result = manager.GetPlayResult(idx);
-                    missed = result <= 1;
-                }
+                note = stage?.GetMusicDataByIdx(idx);
             }
             catch
             {
-                missed = true;
+                note = null;
             }
 
-            if (missed && MissedIds.Add(idx))
+            if (note != null)
             {
-                _missCount++;
+                byte result;
+                try
+                {
+                    var manager = BattleEnemyManager.instance;
+                    result = manager != null ? manager.GetPlayResult(idx) : (byte)1;
+                }
+                catch
+                {
+                    result = 1;
+                }
+
+                uint type = note.noteData.type;
+                int oid = note.objId;
+
+                if (type == TypeMul)
+                {
+                    // doubles are resolved by SetPlayResult + the delayed mul miss check
+                }
+                else if (result <= 1)
+                {
+                    if (type == TypeBlock)
+                    {
+                        if (result != 0)
+                        {
+                            CountMiss(oid, false, $"block result={result}");
+                        }
+                    }
+                    else if (type == TypeGhost)
+                    {
+                        CountMiss(oid, false, $"ghost result={result}");
+                    }
+                    else if (type == TypeEnergy)
+                    {
+                        CountMiss(oid, false, $"energy result={result}");
+                    }
+                    else if (type == TypeMusic)
+                    {
+                        CountMiss(oid, false, $"music result={result}");
+                    }
+                    else
+                    {
+                        CountMiss(oid, false, $"note type={type} result={result}");
+
+                        if (note.isDouble)
+                        {
+                            try
+                            {
+                                var pair = stage.GetMusicDataByIdx(note.doubleIdx);
+                                if (pair != null)
+                                {
+                                    CountMiss(pair.objId, false, $"double pair type={type}");
+                                }
+                            }
+                            catch
+                            {
+                                // ignored
+                            }
+                        }
+                    }
+                }
             }
 
             Poll();
@@ -216,6 +278,26 @@ internal static class RunRecorder
         catch (Exception ex)
         {
             Logger.Warning($"[RunRecorder] OnMissCube failed: {ex.Message}");
+        }
+    }
+
+    private static void CountMiss(int oid, bool longStart, string reason)
+    {
+        if (!MissedOids.Add(oid))
+        {
+            return;
+        }
+
+        _missCount++;
+        if (longStart)
+        {
+            _longPair++;
+        }
+
+        if (_loggedMissEvents < 25)
+        {
+            _loggedMissEvents++;
+            Logger.Msg($"[RunRecorder] miss +1 oid={oid} typeReason={reason} total={_missCount} longPair={_longPair}");
         }
     }
 
@@ -240,6 +322,25 @@ internal static class RunRecorder
                 TryScanTotals();
             }
 
+            float now = ReadSongTime();
+            if (PendingMulMisses.Count > 0)
+            {
+                for (int i = PendingMulMisses.Count - 1; i >= 0; i--)
+                {
+                    var pending = PendingMulMisses[i];
+                    if (now < pending.DueTime)
+                    {
+                        continue;
+                    }
+
+                    PendingMulMisses.RemoveAt(i);
+                    if (!PlayedOids.Contains(pending.Oid))
+                    {
+                        CountMiss(pending.Oid, false, "mul delayed");
+                    }
+                }
+            }
+
             int perfect = task.m_PerfectResult;
             int great = task.m_GreatResult;
             int block = task.m_Block;
@@ -247,10 +348,9 @@ internal static class RunRecorder
             int energy = task.m_EnergyCount;
             int redPoint = task.m_RedPoint;
             int gameMiss = task.m_MissResult;
-            int miss = Math.Max(_missCount, gameMiss);
 
+            int miss = Math.Max(_missCount, gameMiss);
             int judged = perfect + great + block + music + energy + redPoint + miss;
-            float time = ReadSongTime();
 
             var self = Self;
             if (self == null)
@@ -261,7 +361,7 @@ internal static class RunRecorder
             if (self.Samples.Count > 0)
             {
                 var last = self.Samples[^1];
-                bool restarted = judged < _lastJudged || time < last.Time - 0.5f;
+                bool restarted = judged < _lastJudged || now < last.Time - 0.5f;
                 if (restarted)
                 {
                     Begin();
@@ -276,9 +376,9 @@ internal static class RunRecorder
 
             int total = Math.Max(TotalUnits, judged);
 
-            double weighted = perfect + great * 0.5 + block + music + energy + redPoint;
-            int rest = Math.Max(0, total - judged);
-            float acc = total > 0 ? (float)Math.Clamp((weighted + rest) / total * 100.0, 0.0, 100.0) : 100f;
+            double counted = perfect + great * 0.5 + block + music + energy + redPoint;
+            double rest = Math.Max(0.0, total - (perfect + great + block + music + energy + redPoint) - _missCount - _longPair);
+            float acc = total > 0 ? (float)Math.Clamp((counted + rest) / total * 100.0, 0.0, 100.0) : 100f;
 
             int dGreat = great - _lastGreat;
             int dMiss = _missCount - _lastMissCount;
@@ -287,17 +387,17 @@ internal static class RunRecorder
             {
                 for (int i = 0; i < dGreat; i++)
                 {
-                    AddSample(self, time, acc, TaskResult.Great, judged, perfect, great, miss);
+                    AddSample(self, now, acc, TaskResult.Great, judged, perfect, great, miss);
                 }
 
                 for (int i = 0; i < dMiss; i++)
                 {
-                    AddSample(self, time, acc, TaskResult.Miss, judged, perfect, great, miss);
+                    AddSample(self, now, acc, TaskResult.Miss, judged, perfect, great, miss);
                 }
             }
             else
             {
-                AddSample(self, time, acc, TaskResult.Prefect, judged, perfect, great, miss);
+                AddSample(self, now, acc, TaskResult.Prefect, judged, perfect, great, miss);
             }
 
             _lastPerfect = perfect;
@@ -306,14 +406,13 @@ internal static class RunRecorder
             _lastMusic = music;
             _lastEnergy = energy;
             _lastRedPoint = redPoint;
-            _lastMiss = miss;
-            _lastMissCount = _missCount;
             _lastJudged = judged;
+            _lastMissCount = _missCount;
 
             if (_loggedSamples < 8)
             {
                 _loggedSamples++;
-                Logger.Msg($"[RunRecorder] judged={judged} total={total} acc={acc:0.00} p={perfect} g={great} b={block} m={music} e={energy} rp={redPoint} miss={miss}(evt={_missCount},game={gameMiss}) time={time:0.000}");
+                Logger.Msg($"[RunRecorder] judged={judged} total={total} acc={acc:0.00} p={perfect} g={great} b={block} m={music} e={energy} rp={redPoint} miss={miss}(evt={_missCount},game={gameMiss}) time={now:0.000}");
             }
         }
         catch (Exception ex)
@@ -378,13 +477,13 @@ internal static class RunRecorder
 
                 switch (note.noteData.type)
                 {
-                    case 2:
+                    case TypeBlock:
                         block++;
                         break;
-                    case 6:
+                    case TypeEnergy:
                         energy++;
                         break;
-                    case 7:
+                    case TypeMusic:
                         music++;
                         break;
                 }
@@ -421,6 +520,51 @@ internal static class RunRecorder
         catch
         {
             return 0f;
+        }
+    }
+
+    /// <summary>Called from PnlVictory.OnVictory.</summary>
+    internal static void FinalizeResults()
+    {
+        try
+        {
+            var self = Self;
+            if (self == null || self.Samples.Count == 0)
+            {
+                return;
+            }
+
+            float ours = self.FinalAcc;
+            float game = 0f;
+            try
+            {
+                var task = TaskStageTarget.instance;
+                if (task != null)
+                {
+                    game = task.GetAccuracy() * 100f;
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            Logger.Msg($"[RunRecorder] final ours={ours:0.00} game={game:0.00} total={TotalUnits} miss={_missCount} longPair={_longPair} judgedLast={_lastJudged}");
+
+            if (game > 0.01f && Math.Abs(game - ours) > 0.01f)
+            {
+                self.Samples.Add(new RunSample
+                {
+                    Time = ReadSongTime(),
+                    Acc = Math.Clamp(game, 0f, 100f),
+                    Judge = TaskResult.None,
+                    Judged = _lastJudged,
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[RunRecorder] finalize failed: {ex.Message}");
         }
     }
 
