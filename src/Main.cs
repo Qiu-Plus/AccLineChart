@@ -9,12 +9,16 @@ internal class Main : MelonMod
         HarmonyInstance.PatchAll(typeof(Main).Assembly);
         MelonEvents.OnGUI.Subscribe(ChartWindow.OnGUI);
 
+        MultiplayerTap.Start();
+        MultiplayerRecorder.Initialize();
+
         LoggerInstance.Msg($"{Name} {ModVersion} initialized.");
     }
 
     public override void OnDeinitializeMelon()
     {
         MelonEvents.OnGUI.Unsubscribe(ChartWindow.OnGUI);
+        MultiplayerTap.Stop();
     }
 
     public override void OnSceneWasInitialized(int buildIndex, string sceneName)
@@ -25,11 +29,20 @@ internal class Main : MelonMod
             {
                 case "GameMain":
                     RunRecorder.Begin();
+                    MultiplayerRecorder.Reset();
                     ChartWindow.Hide();
                     ChartWindow.RequestPrewarm();
                     break;
                 case "UISystem_PC":
-                    ChartWindow.Hide();
+                    if (MultiplayerRecorder.PendingAutoShow)
+                    {
+                        _mpShowAt = Time.time + 0.8f;
+                    }
+                    else
+                    {
+                        ChartWindow.Hide();
+                    }
+
                     ChartWindow.RequestPrewarm();
                     break;
             }
@@ -44,6 +57,7 @@ internal class Main : MelonMod
         Path.Combine(MelonEnvironment.UserDataDirectory, "AccLineChart_open.flag");
 
     private static int _frames;
+    private static float _mpShowAt = -1f;
 
     public override void OnUpdate()
     {
@@ -54,7 +68,30 @@ internal class Main : MelonMod
                 ChartWindow.ToggleDebug();
             }
 
+            if (Input.GetKeyDown(KeyCode.F8))
+            {
+                ChartWindow.ToggleAllPlayers();
+            }
+
             RunRecorder.Poll();
+            MultiplayerTap.Pump();
+            MultiplayerRecorder.Poll();
+
+            // After a multiplayer round, show the chart automatically once we are back in a menu.
+            if (MultiplayerRecorder.PendingAutoShow && !RunRecorder.InGame && _mpShowAt < 0f)
+            {
+                _mpShowAt = Time.time + 0.8f;
+            }
+
+            if (_mpShowAt >= 0f && Time.time >= _mpShowAt)
+            {
+                _mpShowAt = -1f;
+                if (MultiplayerRecorder.PendingAutoShow)
+                {
+                    MultiplayerRecorder.PendingAutoShow = false;
+                    ChartWindow.ShowMultiplayer();
+                }
+            }
 
 
             // Developer-only helpers, off unless DebugLog is enabled in the config file.

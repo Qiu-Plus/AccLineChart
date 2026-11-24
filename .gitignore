@@ -25,6 +25,14 @@ publish/
 *.snupkg
 packages/
 
-# OS
+# OS / Windows reserved device names
 Thumbs.db
 .DS_Store
+CON
+PRN
+AUX
+NUL
+
+# Local backups
+*.bak
+*.bak-*

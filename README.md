@@ -1,23 +1,78 @@
 # AccLineChart
 
-Muse Dash 结算页准度曲线模组（MelonLoader）。打完一首歌后，在结算页弹出一个可拖动、可缩放的准度变化曲线窗口。
+Muse Dash 准度曲线模组（MelonLoader）。单人打完一首歌后在结算页显示可拖动、可缩放的准度曲线；安装 Euterpe 进入多人房间后，实时显示房间内所有玩家的准度曲线、昵称与头像。
 
 ![结算页效果](docs/screenshots/01-results-chart.png)
 
 ## 功能
 
-- 结算页显示本局准度随时间变化的曲线；
-- 曲线从 **100%** 出发：以整张谱面的音符数为分母，未判定的音符按 Perfect 预扣，只有 **Great（黄色点）** 和 **Miss（红色菱形）** 会让曲线下降；
-- 窗口可拖动（标题栏）、可缩放（右下角）、可关闭（右上角 X）；
-- 线条颜色可用 RGB 滑杆调整；
-- 窗口位置、大小、颜色保存在 `UserData/AccLineChart.cfg`；
-- 快捷键 **F9**：打开/关闭测试预览窗口（假数据）。
+- **单人准度曲线**：结算页自动弹出，从 100% 出发，Great（黄点）/ Miss（红菱形）标出下降点；
+- **多人实时曲线**：进入 Euterpe 多人房间后，实时显示所有玩家的准度曲线（数据来自游戏自身 Euterpe 连接，不建立额外连接、不影响联机）；
+- **多人结算**：每回合结束自动弹出面板，显示昵称、头像、Roboko 评级和服务器官方最终准确率；
+- **端点头像昵称标签**：每条曲线末端跟随显示该玩家的头像与昵称；
+- **视图切换**：F8 在「全部玩家 / 只看选中玩家」之间切换，点击或悬停右侧玩家列表切换查看对象；
+- **玩家列表滚动**：房间人数较多时可用鼠标滚轮上下滚动，带滚动条；
+- **HEX 取色**：可用 RGB 滑条或 HEX 输入框（`#RRGGBB` / `RRGGBB` / `#RGB`）调整自己的线条颜色；
+- **窗口操作**：拖动标题栏移动、右下角缩放、点 X 关闭，位置/大小/颜色自动保存；
+- **F9 预览**：主界面按 F9 打开假数据预览窗口，方便调整布局和配色；
+- **性能优化**：曲线光栅化到缓存纹理，多人房同时显示 10+ 条实时曲线也不会明显掉帧。
 
 ## 环境要求
 
 - Muse Dash（Steam 版，开发时基于 6.8.0）
-- [MelonLoader](https://github.com/LavaGang/MelonLoader)（开发时基于 0.7.3）
-- 构建需要 [.NET 10 SDK](https://dotnet.microsoft.com/download)（项目目标框架仍是 `net6.0`）
+- [MelonLoader](https://github.com/LavaGang/MelonLoader) 0.7.3+（.NET 6）
+- 多人实时功能需要安装 [Euterpe](https://euterpe-org.com/) 并联机
+- 构建源码需要 .NET 10 SDK（项目目标框架仍是 `net6.0`）
+
+## 安装
+
+1. 把 `AccLineChart.dll` 放进游戏目录的 `Mods` 文件夹；
+2. 把 `MinHook.NET.dll` 放进游戏目录的 `UserLibs` 文件夹（进程内读取联机数据所需的纯托管 Hook 库，BSD-3-Clause）；
+3. 可选：`UserLibs` 中若有 `SkiaSharp.dll` 与 `libSkiaSharp.dll`（很多现代模组会自带），多人玩家头像会自动显示；没有则用颜色圆点代替；
+4. 重启游戏。
+
+## 使用说明
+
+### 单人
+正常游玩一首歌，结算页会自动弹出准度曲线窗口。曲线从 100% 起算，Great 为黄点、Miss 为红菱形，终点与游戏结算准度一致。
+
+### 多人联机
+安装 Euterpe 并进入多人房间。当房间内有其他玩家时，模组会从游戏自身的 Euterpe WebSocket 连接读取服务器广播的实时成绩帧，实时绘制所有玩家的准度曲线；房间只有自己时只显示自己的数据，进入多人大厅/房间后自动生效。
+
+- 每回合结束会自动弹出面板；对手没有实时数据时，以服务器官方最终准确率显示一条带 `≈` 的近似线；
+- 面板右侧「玩家」列表显示头像、昵称和最终准确率，点击或悬停可只看该玩家；F8 切换全部/单人视图；
+- 玩家多时鼠标滚轮滚动列表。
+
+### 快捷键与窗口
+- `F8`：全部玩家 / 只看选中玩家；
+- `F9`：打开/关闭预览窗口（主界面可用；有多人真实数据时优先显示真实数据）；
+- 拖动标题栏移动、右下角缩放、右上角 X 关闭；
+- 窗口位置、大小、颜色保存在 `UserData/AccLineChart.cfg`。
+
+### 颜色
+右侧侧边栏可拖动 R/G/B 滑条，或在 HEX 输入框中点击后输入 `#RRGGBB`、`RRGGBB` 或 `#RGB`，回车应用、Esc 取消。
+
+## 配置
+
+配置文件：`UserData/AccLineChart.cfg`（MelonPreferences）
+
+| 项 | 说明 |
+|---|---|
+| `LineColorR/G/B` | 线条颜色（0~1） |
+| `LineColorHex` | 线条颜色（HEX，与 RGB 滑条同步） |
+| `WindowX/Y/W/H` | 窗口位置和大小 |
+| `ShowPerfectDots` | 是否用小白点标注 Perfect（默认关） |
+| `DebugLog` | 调试日志（默认关） |
+| `MultiplayerTap` | 是否读取 Euterpe 联机数据（默认开；只读，不额外连接） |
+| `MultiplayerLive` | 实验性网页观战连接（默认关；开启可能让游戏重连） |
+| `MpNetworkDiagnostics` | 网络诊断日志（默认关） |
+
+## 联机数据来源与隐私
+
+- 模组在**游戏进程内**读取 Euterpe 自己收到的 31 字节实时成绩帧（uid、谱面时间、分数、准确率、判定数等），不建立额外连接、不登录、不修改游戏或 Euterpe 文件；
+- 游戏与 Euterpe 的连接、行为完全不受影响，不会出现「联机断开/重连」弹窗；
+- 只读取当前房间公开显示的数据，不扫描房间、不收集他人信息到外部；
+- 不读写 `_game` 存档，只写自己的配置文件。
 
 ## 构建
 
@@ -40,33 +95,17 @@ dotnet build -c Release
 
 构建产物：`artifacts/bin/AccLineChart/release/AccLineChart.dll`
 
-可选：设置 `MD_DEPLOY_DIR` 可把构建结果额外复制到指定目录：
+可选：设置 `MD_DEPLOY_DIR` 可把构建结果额外复制到指定目录。
 
-```powershell
-$env:MD_DEPLOY_DIR = "D:\some\staging\"
-dotnet build -c Release
-```
+## 更新日志
 
-## 安装
+见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
-把 `AccLineChart.dll` 放进游戏目录的 `Mods` 文件夹，重启游戏。
+## 许可与第三方组件
 
-## 配置
-
-配置文件：`UserData/AccLineChart.cfg`（MelonPreferences）
-
-| 项 | 说明 |
-|---|---|
-| `LineColorR/G/B` | 线条颜色（0~1） |
-| `WindowX/Y/W/H` | 窗口位置和大小 |
-| `ShowPerfectDots` | 是否用小白点标注 Perfect（默认关） |
-| `DebugLog` | 调试日志（默认关） |
-
-## 说明
-
-- 不联网、不读写游戏存档、不修改游戏或 Euterpe 文件，只写自己的配置文件；
-- 当前版本只统计自己这一局的准度，不包含联机多人画面；
-- 曲线在打完时与游戏结算的准度一致。
+- 本仓库代码以 [MIT](LICENSE) 协议发布；
+- 运行时依赖 MinHook.NET（BSD-3-Clause）等第三方组件，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)；
+- 本仓库不包含、不修改 Euterpe 或 Muse Dash 的任何文件。
 
 ## 作者
 

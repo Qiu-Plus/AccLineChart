@@ -4,10 +4,18 @@
         <AssemblyName>AccLineChart</AssemblyName>
         <RootNamespace>AccLineChart</RootNamespace>
         <ModName>AccLineChart</ModName>
-        <Version>1.0.5</Version>
+        <Version>1.5.3</Version>
         <Authors>巯_QiuPlus</Authors>
-        <Description>结算页准度曲线：可拖动/缩放的准度变化图，从 100% 起算，Great 黄点、Miss 红点，颜色与窗口位置可保存。无联网、不改存档。</Description>
+        <Description>结算页准度曲线：可拖动/缩放的准度变化图，从 100% 起算，Great 黄点、Miss 红点，支持 HEX 取色；多人联机实时显示所有玩家的准度曲线、昵称与头像（进程内只读，不额外连接，不影响联机）。</Description>
+        <Nullable>enable</Nullable>
+        <!-- MinHook.NET (pure managed) must be copied next to the mod for native hooking. -->
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Pure managed MinHook port used by EuterpeMpTap (BSD-3-Clause). -->
+        <PackageReference Include="MinHook.NET" Version="1.1.2" />
+    </ItemGroup>
 
     <!-- Optional: set MD_DEPLOY_DIR to copy the built DLL somewhere after building. -->
     <PropertyGroup Condition="'$(MD_DEPLOY_DIR)' != ''">

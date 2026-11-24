@@ -19,12 +19,17 @@ internal sealed class RunSample
 
 internal sealed class PlayerSeries
 {
+    public int Uid;
     public string Name = "";
     public Color Color;
     public bool IsSelf;
+    /// <summary>True for multiplayer players whose line is only known from the final round record (no live samples).</summary>
+    public bool IsApproximate;
+    /// <summary>Server (Euterpe round_record.frames) official accuracy; authoritative for the legend.</summary>
+    public float? ServerFinalAcc;
     public readonly List<RunSample> Samples = new();
 
-    public float FinalAcc => Samples.Count == 0 ? 100f : Samples[^1].Acc;
+    public float FinalAcc => ServerFinalAcc ?? (Samples.Count == 0 ? 100f : Samples[^1].Acc);
 }
 
 /// <summary>
@@ -613,6 +618,8 @@ internal static class RunRecorder
         }
 
         ChartName = "";
-        InGame = true;
+        // Preview data must not enter the live recording loop: Poll() sees timeFromMusicStart=0
+        // on the menu and would think the run restarted (Begin() hides the window in the same frame).
+        InGame = false;
     }
 }
