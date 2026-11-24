@@ -1,5 +1,10 @@
 # 更新日志
 
+## 1.5.4
+
+- 改为**单文件发布**：MinHook.NET 作为资源内嵌进 AccLineChart.dll，用户在 Mods 放一个 DLL 即可，不再需要往 UserLibs 放第二个文件
+- 程序启动时自动加载内嵌依赖；若 UserLibs 已有 MinHook.NET 则优先使用（不重复加载）
+
 ## 1.5.3
 
 - 修复曲线缓存纹理上下镜像的问题：曲线恢复为从左上 100% 向右下下降，All Perfect 为顶部水平线

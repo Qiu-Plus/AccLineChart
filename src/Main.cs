@@ -2,6 +2,13 @@ namespace AccLineChart;
 
 internal class Main : MelonMod
 {
+    static Main()
+    {
+        // Must run before WinHttpWsTap (EuterpeMpTap) is JIT-compiled: its fields reference
+        // the embedded MinHook.NET types, so the dependency has to be in the AppDomain first.
+        EmbeddedDeps.EnsureLoaded();
+    }
+
     public override void OnInitializeMelon()
     {
         SettingManager.Register();

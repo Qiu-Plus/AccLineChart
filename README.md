@@ -17,6 +17,10 @@ Muse Dash 准度曲线模组（MelonLoader）。单人打完一首歌后在结�
 - **F9 预览**：主界面按 F9 打开假数据预览窗口，方便调整布局和配色；
 - **性能优化**：曲线光栅化到缓存纹理，多人房同时显示 10+ 条实时曲线也不会明显掉帧。
 
+多人联机（10 人房间实时曲线，曲线末端跟随昵称，右侧玩家列表显示头像/昵称/最终准确率）：
+
+![多人联机实时曲线](docs/screenshots/03-multiplayer.png)
+
 ## 环境要求
 
 - Muse Dash（Steam 版，开发时基于 6.8.0）
@@ -26,10 +30,9 @@ Muse Dash 准度曲线模组（MelonLoader）。单人打完一首歌后在结�
 
 ## 安装
 
-1. 把 `AccLineChart.dll` 放进游戏目录的 `Mods` 文件夹；
-2. 把 `MinHook.NET.dll` 放进游戏目录的 `UserLibs` 文件夹（进程内读取联机数据所需的纯托管 Hook 库，BSD-3-Clause）；
-3. 可选：`UserLibs` 中若有 `SkiaSharp.dll` 与 `libSkiaSharp.dll`（很多现代模组会自带），多人玩家头像会自动显示；没有则用颜色圆点代替；
-4. 重启游戏。
+1. 把 `AccLineChart.dll` 放进游戏目录的 `Mods` 文件夹即可（**单文件发布**，进程内 Hook 库 MinHook.NET 已内嵌在 DLL 中，无需额外文件）；
+2. 可选：`UserLibs` 中若有 `SkiaSharp.dll` 与 `libSkiaSharp.dll`（很多现代模组会自带），多人玩家头像会自动显示；没有则用颜色圆点代替；
+3. 重启游戏。
 
 ## 使用说明
 
@@ -106,6 +109,11 @@ dotnet build -c Release
 - 本仓库代码以 [MIT](LICENSE) 协议发布；
 - 运行时依赖 MinHook.NET（BSD-3-Clause）等第三方组件，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)；
 - 本仓库不包含、不修改 Euterpe 或 Muse Dash 的任何文件。
+
+## 第三方组件
+
+- [MinHook.NET](https://github.com/ccob/minhook.net)（MinHook 的纯托管 C# 移植，BSD-3-Clause）已作为资源内嵌在 `AccLineChart.dll` 中，用于只读地读取 Euterpe 联机的实时成绩帧；
+- 多人玩家头像的 WebP 解码会使用游戏中已存在的 SkiaSharp（若存在），未内嵌。
 
 ## 作者
 
