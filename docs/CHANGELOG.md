@@ -1,5 +1,11 @@
 # 更新日志
 
+## 1.5.5
+
+- 去掉内嵌的 MinHook.NET（约 236 KB）：改用 MelonLoader 自带的 `Iced` 解码器 + VirtualProtect/VirtualAlloc 手写的轻量 x64 detour，最终 DLL 从 410,112 B 降到 **176,128 B**（约 -57%）
+- 单个 `AccLineChart.dll` 仍是唯一需要的文件，安装方式不变；多人功能行为与 1.5.4 相同
+
+
 ## 1.5.4
 
 - 改为**单文件发布**：MinHook.NET 作为资源内嵌进 AccLineChart.dll，用户在 Mods 放一个 DLL 即可，不再需要往 UserLibs 放第二个文件

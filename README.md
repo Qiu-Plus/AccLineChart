@@ -30,7 +30,7 @@ Muse Dash 准度曲线模组（MelonLoader）。单人打完一首歌后在结�
 
 ## 安装
 
-1. 把 `AccLineChart.dll` 放进游戏目录的 `Mods` 文件夹即可（**单文件发布**，进程内 Hook 库 MinHook.NET 已内嵌在 DLL 中，无需额外文件）；
+1. 把 `AccLineChart.dll` 放进游戏目录的 `Mods` 文件夹即可（**单文件发布**，无额外依赖：进程内 Hook 使用 MelonLoader 自带的 Iced 解码器手写的轻量 detour，不内嵌任何 Hook 库）；
 2. 可选：`UserLibs` 中若有 `SkiaSharp.dll` 与 `libSkiaSharp.dll`（很多现代模组会自带），多人玩家头像会自动显示；没有则用颜色圆点代替；
 3. 重启游戏。
 
@@ -107,12 +107,12 @@ dotnet build -c Release
 ## 许可与第三方组件
 
 - 本仓库代码以 [MIT](LICENSE) 协议发布；
-- 运行时依赖 MinHook.NET（BSD-3-Clause）等第三方组件，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)；
+- 运行时不需要额外第三方库（Hook 仅使用 MelonLoader 随附的 Iced 解码器，不随模组分发），详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)；
 - 本仓库不包含、不修改 Euterpe 或 Muse Dash 的任何文件。
 
 ## 第三方组件
 
-- [MinHook.NET](https://github.com/ccob/minhook.net)（MinHook 的纯托管 C# 移植，BSD-3-Clause）已作为资源内嵌在 `AccLineChart.dll` 中，用于只读地读取 Euterpe 联机的实时成绩帧；
+- 进程内 Hook 是自写的轻量 x64 detour（VirtualProtect/VirtualAlloc + `Iced` 指令解码重定位），只使用 MelonLoader 自带的 `Iced.dll`，不内嵌、不分发任何 Hook 库；
 - 多人玩家头像的 WebP 解码会使用游戏中已存在的 SkiaSharp（若存在），未内嵌。
 
 ## 作者

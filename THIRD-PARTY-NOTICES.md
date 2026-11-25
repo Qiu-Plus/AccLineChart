@@ -4,7 +4,7 @@
 
 | 组件 | 用途 | 许可 | 来源 |
 |---|---|---|---|
-| [MinHook.NET](https://www.nuget.org/packages/MinHook.NET) 1.1.2 | 进程内只读地 hook WinHTTP WebSocket 收包 API，用于读取 Euterpe 联机实时成绩帧 | BSD-3-Clause | NuGet 包，构建后 `MinHook.NET.dll` 需与模组一起部署 |
+| [Iced](https://github.com/icedland/iced)（随 MelonLoader 提供） | x64 指令解码 / 重定位，用于自写的最小 detour（只读读取 Euterpe 联机成绩帧） | MIT | 随 MelonLoader 安装，不随模组分发 |
 | [MelonLoader](https://github.com/LavaGang/MelonLoader) 0.7.3 | Mod 加载器 / Harmony | Apache-2.0 | 游戏侧环境 |
 | [SkiaSharp](https://github.com/mono/SkiaSharp)（可选） | 解码 Euterpe 玩家头像（WebP）；缺失时使用颜色圆点代替 | MIT | 若 `UserLibs` 中已有则自动使用 |
 

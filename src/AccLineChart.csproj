@@ -4,27 +4,23 @@
         <AssemblyName>AccLineChart</AssemblyName>
         <RootNamespace>AccLineChart</RootNamespace>
         <ModName>AccLineChart</ModName>
-        <Version>1.5.4</Version>
+        <Version>1.5.5</Version>
         <Authors>巯_QiuPlus</Authors>
         <Description>结算页准度曲线：可拖动/缩放的准度变化图，从 100% 起算，Great 黄点、Miss 红点，支持 HEX 取色；多人联机实时显示所有玩家的准度曲线、昵称与头像（进程内只读，不额外连接，不影响联机）。</Description>
         <Nullable>enable</Nullable>
-        <!-- MinHook.NET (pure managed) must be copied next to the mod for native hooking. -->
-        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
 
-    <ItemGroup>
-        <!-- Pure managed MinHook port used by EuterpeMpTap (BSD-3-Clause).
-             It is embedded into AccLineChart.dll so users only install one file. -->
-        <PackageReference Include="MinHook.NET" Version="1.1.2" GeneratePathProperty="true" />
-    </ItemGroup>
-
-    <!-- Embed MinHook.NET.dll as a resource: single-file distribution (no UserLibs dependency).
-         The binary lives in libs/MinHook.NET.dll (from the MinHook.NET NuGet package, BSD-3-Clause). -->
-    <ItemGroup>
-        <EmbeddedResource Include="libs\MinHook.NET.dll">
-            <LogicalName>AccLineChart.Resources.MinHook.NET.dll</LogicalName>
-        </EmbeddedResource>
-    </ItemGroup>
+    <!-- The tap's tiny native detour uses the Iced decoder that MelonLoader already ships
+         (part of Il2CppInterop); reference it compile-time only, nothing extra is shipped. -->
+    <Target Name="AddIcedReference" BeforeTargets="ResolveAssemblyReferences"
+            Condition="'$(GameFolder)' != '' and Exists('$(MelonNET6)Iced.dll')">
+        <ItemGroup>
+            <Reference Include="Iced">
+                <HintPath>$(MelonNET6)Iced.dll</HintPath>
+                <Private>false</Private>
+            </Reference>
+        </ItemGroup>
+    </Target>
 
     <!-- Optional: set MD_DEPLOY_DIR to copy the built DLL somewhere after building. -->
     <PropertyGroup Condition="'$(MD_DEPLOY_DIR)' != ''">
