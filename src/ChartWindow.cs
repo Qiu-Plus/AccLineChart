@@ -983,6 +983,9 @@ internal static class ChartWindow
             {
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear,
+                // Scene changes call Resources.UnloadUnusedAssets(); runtime textures without this
+                // flag get destroyed and the chart goes blank until the next rasterization.
+                hideFlags = HideFlags.DontUnloadUnusedAsset,
             };
             _plotPixels = new Color32[w * h];
             _plotTextureW = w;
@@ -995,6 +998,10 @@ internal static class ChartWindow
         {
             RasterizePlot(series, w, h, yMin, yMax, maxTime);
             _plotSignature = signature;
+            if (Logger.IsDebug)
+            {
+                Logger.Msg($"[ChartWindow] plot rasterized {w}x{h} series={series.Count} y=[{yMin:0.00}..{yMax:0.00}] t={maxTime:0.0}");
+            }
         }
 
         GUI.DrawTexture(new Rect(plot.x, plot.y, w, h), _plotTexture, ScaleMode.StretchToFill, true);

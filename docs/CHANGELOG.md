@@ -1,5 +1,17 @@
 # 更新日志
 
+## 1.5.7
+
+- 修复多人结算里自己的曲线丢失/显示 100% 的问题：一局结束后（`PnlVictory`）冻结本地采样，场景切换或游戏判定计数器归零都不会再清空这一局的数据；下一局 `GameStart` 才重新开始记录
+- 修复图表纵轴被压扁、其他玩家曲线被裁掉的问题（根因同上：只剩一个 100% 的数据点）
+- 修复玩家头像在场景切换后消失的问题：运行时创建的头像/曲线缓存纹理加上 `HideFlags.DontUnloadUnusedAsset`，不再被 `Resources.UnloadUnusedAssets` 卸载；纹理失效时会从磁盘缓存自动重新加载
+- 头像下载改用 `MpAvatarCache` 磁盘缓存（`UserData/AccLineChart/avatars`），失败后 20 秒才重试，并输出 `[mp] avatar ...` 诊断日志
+
+## 1.5.6
+
+- 内部测试版：头像加载链路诊断（下载/解码日志、进程内自检），未公开发布
+
+
 ## 1.5.5
 
 - 去掉内嵌的 MinHook.NET（约 236 KB）：改用 MelonLoader 自带的 `Iced` 解码器 + VirtualProtect/VirtualAlloc 手写的轻量 x64 detour，最终 DLL 从 410,112 B 降到 **176,128 B**（约 -57%）

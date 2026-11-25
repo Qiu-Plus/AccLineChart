@@ -12,6 +12,11 @@ internal class Main : MelonMod
         MultiplayerTap.Start();
         MultiplayerRecorder.Initialize();
 
+        if (SettingManager.DebugLog)
+        {
+            MultiplayerRecorder.DebugAvatarSelfTest("https://euterpe-org.com/static/images/1000/1396.webp");
+        }
+
         LoggerInstance.Msg($"{Name} {ModVersion} initialized.");
     }
 
@@ -28,8 +33,10 @@ internal class Main : MelonMod
             switch (sceneName)
             {
                 case "GameMain":
-                    RunRecorder.Begin();
-                    MultiplayerRecorder.Reset();
+                    // Do NOT reset the run here: Euterpe routes back through GameMain when a
+                    // multiplayer round ends, and that used to wipe the local player's curve
+                    // before the results window opened. A real new run is started by
+                    // StageBattleComponent.GameStart instead.
                     ChartWindow.Hide();
                     ChartWindow.RequestPrewarm();
                     break;

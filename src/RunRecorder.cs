@@ -83,6 +83,7 @@ internal static class RunRecorder
 
     private static int _loggedSamples;
     private static int _loggedMissEvents;
+    private static bool _finalized;
 
     internal static void Begin()
     {
@@ -111,6 +112,7 @@ internal static class RunRecorder
         PendingMulMisses.Clear();
         _loggedSamples = 0;
         _loggedMissEvents = 0;
+        _finalized = false;
 
         ChartWindow.Hide();
     }
@@ -311,6 +313,14 @@ internal static class RunRecorder
     {
         if (!InGame)
         {
+            return;
+        }
+
+        if (_finalized)
+        {
+            // The run already ended and its curve is on screen: the game resets its counters and
+            // reloads GameMain after a round, and polluting the finished samples here used to
+            // destroy the local player's curve right before the multiplayer results opened.
             return;
         }
 
@@ -554,6 +564,7 @@ internal static class RunRecorder
                 // ignored
             }
 
+            _finalized = true;
             Logger.Msg($"[RunRecorder] final ours={ours:0.00} game={game:0.00} total={TotalUnits} miss={_missCount} longPair={_longPair} judgedLast={_lastJudged}");
 
             if (game > 0.01f && Math.Abs(game - ours) > 0.01f)

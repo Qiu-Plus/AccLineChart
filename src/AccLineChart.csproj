@@ -4,7 +4,7 @@
         <AssemblyName>AccLineChart</AssemblyName>
         <RootNamespace>AccLineChart</RootNamespace>
         <ModName>AccLineChart</ModName>
-        <Version>1.5.5</Version>
+        <Version>1.5.7</Version>
         <Authors>巯_QiuPlus</Authors>
         <Description>结算页准度曲线：可拖动/缩放的准度变化图，从 100% 起算，Great 黄点、Miss 红点，支持 HEX 取色；多人联机实时显示所有玩家的准度曲线、昵称与头像（进程内只读，不额外连接，不影响联机）。</Description>
         <Nullable>enable</Nullable>

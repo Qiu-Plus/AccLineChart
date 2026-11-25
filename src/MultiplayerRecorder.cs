@@ -31,6 +31,9 @@ internal static class MultiplayerRecorder
     private static readonly HashSet<int> _avatarRequested = new();
     private static readonly HttpClient Http = CreateHttp();
     private static readonly SemaphoreSlim AvatarGate = new(3, 3);
+    private static readonly Dictionary<int, float> _avatarRetryAt = new();
+    private static readonly Lazy<MpAvatarCache> AvatarCache = new(() =>
+        new MpAvatarCache(Path.Combine(MelonEnvironment.UserDataDirectory, "AccLineChart", "avatars")));
     private static int _avatarFailures;
 
     // Website-style spectator connection: gives live per-player score/accuracy frames.
@@ -508,13 +511,55 @@ internal static class MultiplayerRecorder
 
     internal static Texture2D? GetAvatar(int uid)
     {
+        bool stale = false;
         lock (Gate)
         {
-            if (_avatarTextures.TryGetValue(uid, out var tex)) return tex;
+            if (_avatarTextures.TryGetValue(uid, out var tex))
+            {
+                if (tex != null)
+                {
+                    return tex;
+                }
+
+                _avatarTextures.Remove(uid);
+                stale = true;
+            }
+        }
+
+        if (stale)
+        {
+            // The texture was unloaded with the previous scene: allow a fresh (disk-cached) load.
+            lock (Gate) _avatarRequested.Remove(uid);
+            Logger.Msg($"[mp] avatar texture lost uid={uid}, reloading");
         }
 
         RequestAvatar(uid);
         return null;
+    }
+
+    /// <summary>Debug-only: prove that download + WebP decode work inside the game process.</summary>
+    internal static void DebugAvatarSelfTest(string url)
+    {
+        Logger.Msg($"[mp][test] avatar self-test start {url}");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var bytes = await AvatarCache.Value.GetAsync(url).ConfigureAwait(false);
+                Logger.Msg($"[mp][test] downloaded bytes={(bytes?.Length ?? -1)}");
+                if (bytes == null || bytes.Length == 0)
+                {
+                    return;
+                }
+
+                var png = NormalizeAvatarBytes(bytes);
+                Logger.Msg($"[mp][test] normalized bytes={(png?.Length ?? -1)}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Msg($"[mp][test] failed {ex.GetType().Name}: {ex.Message}");
+            }
+        });
     }
 
     private static void RequestAvatar(int uid)
@@ -523,6 +568,7 @@ internal static class MultiplayerRecorder
         lock (Gate)
         {
             if (uid == 0 || _avatarRequested.Contains(uid)) return;
+            if (_avatarRetryAt.TryGetValue(uid, out var retryAt) && Time.time < retryAt) return;
             if (!_members.TryGetValue(uid, out var member) || string.IsNullOrEmpty(member.AvatarUrl)) return;
             _avatarRequested.Add(uid);
             url = member.AvatarUrl;
@@ -533,21 +579,24 @@ internal static class MultiplayerRecorder
             await AvatarGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                using var resp = await Http.GetAsync(url).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode)
+                var bytes = await AvatarCache.Value.GetAsync(url).ConfigureAwait(false);
+                if (bytes == null || bytes.Length == 0 || bytes.Length > 4 * 1024 * 1024)
                 {
-                    throw new InvalidOperationException("HTTP " + (int)resp.StatusCode);
+                    throw new InvalidOperationException(bytes == null ? "download failed" : "bad size " + bytes.Length);
                 }
 
-                var bytes = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                if (bytes.Length == 0 || bytes.Length > 4 * 1024 * 1024) return;
                 lock (Gate) _pendingAvatarBytes[uid] = bytes;
+                Logger.Msg($"[mp] avatar downloaded uid={uid} bytes={bytes.Length}");
             }
             catch (Exception ex)
             {
-                if (Interlocked.Increment(ref _avatarFailures) <= 6)
-                    Logger.Warning($"[mp] avatar download failed uid={uid} url={url}: {ex.Message}");
-                lock (Gate) _avatarRequested.Remove(uid); // allow a later retry
+                if (Interlocked.Increment(ref _avatarFailures) <= 10)
+                    Logger.Msg($"[mp] avatar failed uid={uid} url={url}: {ex.Message}");
+                lock (Gate)
+                {
+                    _avatarRequested.Remove(uid);
+                    _avatarRetryAt[uid] = Time.time + 20f; // retry later, don't hammer the server
+                }
             }
             finally
             {
@@ -577,22 +626,20 @@ internal static class MultiplayerRecorder
                 var bytes = NormalizeAvatarBytes(pair.Value);
                 if (bytes == null || !tex.LoadImage(bytes))
                 {
-                    Logger.Warning($"[mp] avatar for uid={pair.Key} could not be decoded ({pair.Value.Length} bytes)");
+                    Logger.Msg($"[mp] avatar decode failed uid={pair.Key} ({pair.Value.Length} bytes)");
                     continue;
                 }
 
                 tex.wrapMode = TextureWrapMode.Clamp;
                 tex.filterMode = FilterMode.Bilinear;
+                tex.hideFlags = HideFlags.DontUnloadUnusedAsset; // survive scene changes / unused-asset unloads
                 lock (Gate) _avatarTextures[pair.Key] = tex;
-                if (!_avatarLogged)
-                {
-                    _avatarLogged = true;
-                    Logger.Msg($"[mp] avatar decoded: uid={pair.Key} {tex.width}x{tex.height}");
-                }
+                Logger.Msg($"[mp] avatar decoded uid={pair.Key} {tex.width}x{tex.height} ({pair.Value.Length} bytes)");
+                _avatarLogged = true;
             }
             catch (Exception ex)
             {
-                Logger.Warning($"[mp] avatar decode failed: {ex.Message}");
+                Logger.Msg($"[mp] avatar texture failed uid={pair.Key}: {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
@@ -639,7 +686,7 @@ internal static class MultiplayerRecorder
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[mp] webp decode failed: {ex.GetType().Name}: {ex.Message}");
+            Logger.Msg($"[mp] webp decode failed: {ex.GetType().Name}: {ex.Message}");
             return null;
         }
         finally
@@ -666,7 +713,11 @@ internal static class MultiplayerRecorder
                     if (File.Exists(path)) asm = Assembly.LoadFrom(path);
                 }
 
-                if (asm == null) return false;
+                if (asm == null)
+                {
+                    Logger.Msg("[mp] SkiaSharp assembly not found (avatars will fall back to dots)");
+                    return false;
+                }
                 _skBitmapType = asm.GetType("SkiaSharp.SKBitmap");
                 _skImageType = asm.GetType("SkiaSharp.SKImage");
                 _skDataType = asm.GetType("SkiaSharp.SKData");
@@ -679,12 +730,14 @@ internal static class MultiplayerRecorder
                 _skEncode = _skImageType.GetMethod("Encode", new[] { _skFormatType, typeof(int) });
                 _skToArray = _skDataType.GetMethod("ToArray", Type.EmptyTypes);
                 _skiaAvailable = _skDecode != null && _skFromBitmap != null && _skEncode != null && _skToArray != null;
-                if (_skiaAvailable) Logger.Msg("[mp] SkiaSharp webp decoder ready");
+                Logger.Msg(_skiaAvailable
+                    ? "[mp] SkiaSharp webp decoder ready"
+                    : $"[mp] SkiaSharp loaded but methods missing (decode={_skDecode != null})");
                 return _skiaAvailable;
             }
             catch (Exception ex)
             {
-                Logger.Warning("[mp] SkiaSharp not available: " + ex.Message);
+                Logger.Msg("[mp] SkiaSharp not available: " + ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
         }
