@@ -121,6 +121,8 @@ internal static class RunRecorder
     {
         Begin();
         TryScanTotals();
+        // A new battle (single or multiplayer) never shows the previous room's players.
+        MultiplayerRecorder.ClearRoom();
     }
 
     internal static void End()

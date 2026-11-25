@@ -35,6 +35,8 @@ internal static class MultiplayerTap
     internal static event Action<MpRoundRecord>? RoundFinished;
     /// <summary>Live per-player accuracy/score rows from the game's own WS connection.</summary>
     internal static event Action<EuterpeMp.MpLiveScore[]>? LiveScores;
+    /// <summary>Raised when the game itself leaves the multiplayer room (outgoing leave_room action).</summary>
+    internal static event Action? RoomLeft;
 
     /// <summary>Nickname/avatar/rating of a round_record slot (slot indexes room_state.round.entrants).</summary>
     internal static MpMember? MemberForSlot(int slot) => _feed?.MemberForSlot(slot);
@@ -70,12 +72,36 @@ internal static class MultiplayerTap
             _feed.RoomChanged += OnRoomChanged;
             _feed.RoundFinished += OnRoundFinished;
             _feed.LiveScores += scores => LiveScores?.Invoke(scores);
+            EuterpeMpTap.WinHttpWsTap.OutgoingText += OnOutgoingText;
             _feed.RoundHistoryReceived += _ => Logger.Msg("[mp] round_history received");
             Logger.Msg($"[mp] tap active, frames -> {_dumpPath}");
         }
         catch (Exception ex)
         {
             Logger.Warning($"[mp] tap start failed: {ex}");
+        }
+    }
+
+    private static void OnOutgoingText(string text)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return;
+            if (!root.TryGetProperty("t", out var kind) || kind.ValueKind != System.Text.Json.JsonValueKind.String) return;
+            switch (kind.GetString())
+            {
+                case "leave_room":
+                case "leave":
+                    Logger.Msg("[mp] room left (game sent leave_room)");
+                    RoomLeft?.Invoke();
+                    break;
+            }
+        }
+        catch
+        {
+            // not JSON / not an action envelope: ignore
         }
     }
 

@@ -77,12 +77,14 @@ public static class WinHttpWsTap
                 _detour = new WinHttpWebSocketReceiveFn(Detour);
                 _original = _engine.CreateHook(_receiveAddress, _detour);
 
+                // The send hook is always installed (tiny): the outgoing JSON tells us when the
+                // game leaves a multiplayer room, so the chart can drop the stale players.
+                var send = System.Runtime.InteropServices.NativeLibrary.GetExport(winhttp, "WinHttpWebSocketSend");
+                _sendDetour = new WinHttpWebSocketSendFn(DetourSend);
+                _sendOriginal = _engine.CreateHook(send, _sendDetour);
+
                 if (NetworkDiagnostics)
                 {
-                    var send = System.Runtime.InteropServices.NativeLibrary.GetExport(winhttp, "WinHttpWebSocketSend");
-                    _sendDetour = new WinHttpWebSocketSendFn(DetourSend);
-                    _sendOriginal = _engine.CreateHook(send, _sendDetour);
-
                     var connect = System.Runtime.InteropServices.NativeLibrary.GetExport(winhttp, "WinHttpConnect");
                     _connectDetour = new WinHttpConnectFn(DetourConnect);
                     _connectOriginal = _engine.CreateHook(connect, _connectDetour);
@@ -136,6 +138,7 @@ public static class WinHttpWsTap
         {
             PendingText.Clear();
             PendingBinary.Clear();
+            PendingOutgoing.Clear();
         }
     }
 
@@ -241,10 +244,13 @@ public static class WinHttpWsTap
     private static WinHttpReadDataFn? _readOriginal, _readDetour;
     private static int _sendLogged;
 
+    private static readonly Dictionary<IntPtr, MemoryStream> PendingOutgoing = new();
+
     private static uint DetourSend(IntPtr webSocket, int bufferType, IntPtr buffer, uint length)
     {
         try
         {
+            CaptureOutgoing(webSocket, bufferType, buffer, length);
             if (NetworkDiagnostics && _sendLogged < 400)
             {
                 _sendLogged++;
@@ -256,6 +262,36 @@ public static class WinHttpWsTap
         }
         catch { }
         return _sendOriginal?.Invoke(webSocket, bufferType, buffer, length) ?? 0;
+    }
+
+    private static void CaptureOutgoing(IntPtr webSocket, int bufferType, IntPtr buffer, uint length)
+    {
+        if (length == 0 || buffer == IntPtr.Zero) return;
+        switch (bufferType)
+        {
+            case Utf8Fragment:
+            case Utf8Message:
+            {
+                MemoryStream ms;
+                lock (Sync)
+                {
+                    if (!PendingOutgoing.TryGetValue(webSocket, out ms!))
+                        PendingOutgoing[webSocket] = ms = new MemoryStream();
+                }
+
+                ms.Write(BufferSnapshot(buffer, (int)length), 0, (int)length);
+                if (bufferType == Utf8Message)
+                {
+                    var text = Encoding.UTF8.GetString(ms.ToArray());
+                    ms.SetLength(0);
+                    try { OutgoingText?.Invoke(text); } catch { /* observers must not break the game */ }
+                }
+                break;
+            }
+            case CloseBuffer:
+                lock (Sync) PendingOutgoing.Remove(webSocket);
+                break;
+        }
     }
 
     private static IntPtr DetourConnect(IntPtr session, IntPtr serverName, ushort port, uint reserved)

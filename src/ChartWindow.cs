@@ -113,6 +113,7 @@ internal static class ChartWindow
             }
 
             _visible = true;
+            _multiplayerMode = false;
             Logger.Msg($"[ChartWindow] results shown, samples={RunRecorder.Self?.Samples.Count ?? 0}, totalNotes={RunRecorder.TotalUnits}");
         }
         catch (Exception ex)
@@ -625,8 +626,24 @@ internal static class ChartWindow
             if (own.Samples.Count > 0) _allSeries.Add(own);
         }
 
-        _allSeries.AddRange(MultiplayerRecorder.Series);
+        // Only the multiplayer results panel may show other players; the single-player
+        // results screen used to keep showing the last room's players.
+        if (_multiplayerMode)
+        {
+            _allSeries.AddRange(MultiplayerRecorder.Series);
+        }
+
         return _allSeries;
+    }
+
+    /// <summary>Room left / new battle: leave multiplayer view so stale players disappear.</summary>
+    internal static void LeaveMultiplayerView()
+    {
+        _multiplayerMode = false;
+        if (_visible)
+        {
+            Hide();
+        }
     }
 
     /// <summary>F8: switch between "all players in one panel" and "only the selected player".</summary>
@@ -663,8 +680,18 @@ internal static class ChartWindow
                 _rect = SettingManager.WindowRect;
             }
 
-            _visible = true;
+            _multiplayerMode = true;
             var series = CollectSeries();
+            if (series.Count == 0)
+            {
+                // e.g. the room was left right before the auto-show fired: nothing to present.
+                _multiplayerMode = false;
+                Hide();
+                Logger.Msg("[ChartWindow] multiplayer panel skipped (no data)");
+                return;
+            }
+
+            _visible = true;
             Logger.Msg($"[ChartWindow] multiplayer results shown (series={series.Count})");
             foreach (var p in series)
             {
@@ -935,6 +962,7 @@ internal static class ChartWindow
     private static int _plotTextureW;
     private static int _plotTextureH;
     private static long _plotSignature = long.MinValue;
+    private static bool _multiplayerMode;
 
     private static long ComputePlotSignature(IReadOnlyList<PlayerSeries> series, int w, int h, float yMin, float yMax, float maxTime)
     {

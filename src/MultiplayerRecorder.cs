@@ -88,9 +88,35 @@ internal static class MultiplayerRecorder
         }
 
         MultiplayerTap.RoomChanged += OnRoomChanged;
+        MultiplayerTap.RoomLeft += ClearRoom;
         MultiplayerTap.RoundFinished += OnRoundFinished;
         MultiplayerTap.LiveScores += scores => _liveQueue.Enqueue(scores);
         Logger.Msg($"[mp] recorder ready (self uid={_selfUid} nick='{_selfNick}')");
+    }
+
+    /// <summary>Drop the other players' data (room left / new battle). Keeps local run data and avatar cache.</summary>
+    internal static void ClearRoom()
+    {
+        lock (Gate)
+        {
+            _series.Clear();
+            _byUid.Clear();
+            _liveSamples.Clear();
+            _lastTickByUid.Clear();
+            _members.Clear();
+            _avatarRequested.Clear();
+            _avatarRetryAt.Clear();
+            _roundSeq = -1;
+            _entrants = new List<int>();
+            _roomId = null;
+            _roundActive = false;
+            PendingAutoShow = false;
+            SelfOfficialAcc = null;
+        }
+
+        while (_liveQueue.TryDequeue(out _)) { }
+        ChartWindow.LeaveMultiplayerView();
+        Logger.Msg("[mp] cleared multiplayer data");
     }
 
     internal static void Reset()
@@ -223,7 +249,18 @@ internal static class MultiplayerRecorder
             var newAvatars = new List<int>();
             lock (Gate)
             {
-                if (!string.IsNullOrEmpty(room.RoomId) && room.RoomId != _roomId)
+                if (string.IsNullOrEmpty(room.RoomId) && _series.Count > 0)
+                {
+                    _series.Clear();
+                    _byUid.Clear();
+                    _liveSamples.Clear();
+                    _lastTickByUid.Clear();
+                    _members.Clear();
+                    _roundSeq = -1;
+                    _entrants = new List<int>();
+                    PendingAutoShow = false;
+                }
+                else if (!string.IsNullOrEmpty(room.RoomId) && room.RoomId != _roomId)
                 {
                     if (_roomId != null)
                     {
