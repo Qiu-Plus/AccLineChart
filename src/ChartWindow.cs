@@ -75,6 +75,7 @@ internal static class ChartWindow
     private static readonly List<(Rect Rect, int Uid)> _legendRows = new(16);
     private static Rect _legendArea;
     private static float _legendScroll;
+    private static bool _closePressed;
     private static float _legendContentHeight;
     private static float _legendViewHeight;
 
@@ -106,6 +107,17 @@ internal static class ChartWindow
             }
 
             _lastShowTicks = now;
+            _previewMode = false;
+            _previewSeries = null;
+
+            var self = RunRecorder.Self;
+            if (self == null || self.Samples.Count == 0)
+            {
+                Hide();
+                Logger.Msg("[ChartWindow] results panel skipped (no local data)");
+                return;
+            }
+
             EnsureInitialized();
             if (!_visible)
             {
@@ -124,6 +136,10 @@ internal static class ChartWindow
 
     internal static void Hide()
     {
+        UiInputBlocker.ReleaseAfter(0.25f);
+        _previewMode = false;
+        _previewSeries = null;
+        PointerOverWindow = false;
         if (!_visible)
         {
             return;
@@ -148,15 +164,11 @@ internal static class ChartWindow
 
         Logger.Msg("[ChartWindow] preview shown (F9)");
 
-        // Never replace real multiplayer results with synthetic debug samples.
-        if (!MultiplayerRecorder.HasRoundData)
-        {
-            RunRecorder.FillDebugData();
-        }
-        else
-        {
-            Logger.Msg("[ChartWindow] debug fill skipped: multiplayer data present");
-        }
+        // Synthetic preview data lives in its own series so it can never leak into a real run
+        // or into the multiplayer results panel.
+        _previewSeries = RunRecorder.CreateDebugSeries();
+        _previewMode = true;
+        _multiplayerMode = false;
 
         EnsureInitialized();
         _rect = SettingManager.WindowRect;
@@ -173,14 +185,14 @@ internal static class ChartWindow
         _initialized = true;
 
         Rect saved = SettingManager.WindowRect;
-        if (saved.width < 420f)
+        if (saved.width < 560f)
         {
-            saved.width = 420f;
+            saved.width = 560f;
         }
 
-        if (saved.height < 260f)
+        if (saved.height < 320f)
         {
-            saved.height = 260f;
+            saved.height = 320f;
         }
 
         _rect = saved;
@@ -222,6 +234,9 @@ internal static class ChartWindow
             {
                 return;
             }
+
+            // Keep the game's uGUI from receiving clicks/drags/scroll underneath our window.
+            UiInputBlocker.SetBlockedRect(_rect);
 
             var e = Event.current;
             HandleInput(e);
@@ -496,7 +511,7 @@ internal static class ChartWindow
 
                 if (_closeRect.Contains(mouse))
                 {
-                    Hide();
+                    _closePressed = true;
                     e.Use();
                     return;
                 }
@@ -512,19 +527,21 @@ internal static class ChartWindow
                     }
                 }
 
-                if (_titleBarRect.Contains(mouse))
-                {
-                    _draggingMove = true;
-                    _dragOffset = mouse - _rect.position;
-                    e.Use();
-                    return;
-                }
-
                 if (_gripRect.Contains(mouse))
                 {
                     _draggingResize = true;
                     _resizeStartMouse = mouse;
                     _resizeStartSize = _rect.size;
+                    e.Use();
+                    return;
+                }
+
+                // The whole window is draggable (not just the title bar); widgets above already
+                // consumed their own clicks, so anything else starts a window move.
+                if (_rect.Contains(mouse))
+                {
+                    _draggingMove = true;
+                    _dragOffset = mouse - _rect.position;
                     e.Use();
                 }
 
@@ -547,8 +564,8 @@ internal static class ChartWindow
                 else if (_draggingResize)
                 {
                     Vector2 size = _resizeStartSize + (mouse - _resizeStartMouse);
-                    size.x = Math.Clamp(size.x, 480f, Math.Max(480f, Screen.width - 20f));
-                    size.y = Math.Clamp(size.y, 280f, Math.Max(280f, Screen.height - 20f));
+                    size.x = Math.Clamp(size.x, 560f, Math.Max(560f, Screen.width - 20f));
+                    size.y = Math.Clamp(size.y, 320f, Math.Max(320f, Screen.height - 20f));
                     _rect.size = size;
                     e.Use();
                 }
@@ -561,6 +578,18 @@ internal static class ChartWindow
                 break;
 
             case EventType.MouseUp when e.button == 0:
+                if (_closePressed)
+                {
+                    _closePressed = false;
+                    if (_closeRect.Contains(mouse))
+                    {
+                        Hide();
+                    }
+
+                    e.Use();
+                    return;
+                }
+
                 if (_draggingMove || _draggingResize)
                 {
                     _draggingMove = false;
@@ -583,13 +612,14 @@ internal static class ChartWindow
     private static void ApplySliderValue(int index, float mouseX)
     {
         Rect track = _sliderTracks[index];
-        if (track.width <= 1f || RunRecorder.Self == null)
+        var target = EditTarget;
+        if (track.width <= 1f || target == null)
         {
             return;
         }
 
         float value = Math.Clamp((mouseX - track.x) / track.width, 0f, 1f);
-        var color = RunRecorder.Self.Color;
+        var color = target.Color;
         switch (index)
         {
             case 0:
@@ -603,14 +633,51 @@ internal static class ChartWindow
                 break;
         }
 
-        RunRecorder.Self.Color = color;
+        target.Color = color;
         SettingManager.SetOwnLineColor(color);
+    }
+
+    /// <summary>The series whose colour the sidebar sliders/HEX edit.</summary>
+    private static PlayerSeries? EditTarget => _previewMode ? _previewSeries : RunRecorder.Self;
+
+    /// <summary>True while the mouse is over our window: used to swallow the game's mouse wheel.</summary>
+    internal static bool PointerOverWindow { get; private set; }
+
+    internal static void UpdatePointerState()
+    {
+        try
+        {
+            if (!_initialized || !_visible)
+            {
+                PointerOverWindow = false;
+                return;
+            }
+
+            var mouse = Input.mousePosition;
+            var p = new Vector2(mouse.x, Screen.height - mouse.y);
+            PointerOverWindow = _rect.Contains(p);
+        }
+        catch
+        {
+            PointerOverWindow = false;
+        }
     }
 
     /// <summary>Local run series + multiplayer players from the in-process Euterpe tap.</summary>
     private static IReadOnlyList<PlayerSeries> CollectSeries()
     {
         _allSeries.Clear();
+        if (_previewMode)
+        {
+            // F9 preview: synthetic data only — never mix it with a real run or a room.
+            if (_previewSeries != null)
+            {
+                _allSeries.Add(_previewSeries);
+            }
+
+            return _allSeries;
+        }
+
         var self = RunRecorder.Self;
         if (self != null && MultiplayerRecorder.SelfUid != 0)
         {
@@ -674,6 +741,9 @@ internal static class ChartWindow
     {
         try
         {
+            _previewMode = false;
+            _previewSeries = null;
+
             EnsureInitialized();
             if (!_visible)
             {
@@ -752,9 +822,9 @@ internal static class ChartWindow
         _hexActive = false;
         if (SettingManager.TrySetOwnLineColorHex(_hexBuffer))
         {
-            if (RunRecorder.Self != null)
+            if (EditTarget != null)
             {
-                RunRecorder.Self.Color = SettingManager.OwnLineColor;
+                EditTarget.Color = SettingManager.OwnLineColor;
             }
 
             Logger.Msg($"[ChartWindow] line color -> {SettingManager.OwnLineColorHex}");
@@ -838,7 +908,7 @@ internal static class ChartWindow
 
         // Hint bar
         GUI.Label(new Rect(_rect.x + 14f, hintTop + 7f, _rect.width - 130f, HintHeight - 12f),
-            "拖动标题栏移动 · 右下角缩放 · 点 X 关闭 · 点玩家切换 · F8 全部/单人", _smallStyle);
+            "拖动窗口任意处移动 · 右下角缩放 · 点 X 关闭 · 滚轮滚动玩家列表 · 点玩家切换 · F8 全部/单人", _smallStyle);
 
         // Resize grip
         _gripRect = new Rect(_rect.xMax - GripSize, _rect.yMax - GripSize, GripSize, GripSize);
@@ -963,6 +1033,8 @@ internal static class ChartWindow
     private static int _plotTextureH;
     private static long _plotSignature = long.MinValue;
     private static bool _multiplayerMode;
+    private static bool _previewMode;
+    private static PlayerSeries? _previewSeries;
 
     private static long ComputePlotSignature(IReadOnlyList<PlayerSeries> series, int w, int h, float yMin, float yMax, float maxTime)
     {
@@ -1447,6 +1519,11 @@ internal static class ChartWindow
         const float rowHeight = 30f;
         float legendTop = y;
         float legendBottom = card.yMax - 158f;
+        if (legendBottom < legendTop)
+        {
+            legendBottom = legendTop; // window too short: no list rows, colour editor stays below
+        }
+
         _legendArea = new Rect(x - 4f, legendTop, width + 8f, Mathf.Max(0f, legendBottom - legendTop));
         _legendViewHeight = _legendArea.height;
         _legendContentHeight = series.Count * rowHeight;
@@ -1458,7 +1535,9 @@ internal static class ChartWindow
         {
             var player = series[i];
             float rowY = legendTop + i * rowHeight - _legendScroll;
-            if (rowY + rowHeight < legendTop || rowY > legendBottom) continue;
+            // Only draw rows that fit completely: partially visible rows used to paint outside the
+            // sidebar (and outside the window) when it was resized small.
+            if (rowY < legendTop - 0.01f || rowY + rowHeight > legendBottom + 0.01f) continue;
 
             var row = new Rect(x, rowY, width, 28f);
             _legendRows.Add((row, player.Uid));
@@ -1509,7 +1588,8 @@ internal static class ChartWindow
         DrawRect(new Rect(x, y, width, 1f), BorderColor);
         y += 12f;
 
-        if (RunRecorder.Self == null)
+        var colorOwner = EditTarget;
+        if (colorOwner == null)
         {
             return;
         }
@@ -1517,7 +1597,7 @@ internal static class ChartWindow
         GUI.Label(new Rect(x, y, width, 22f), "线条颜色", _sectionStyle);
         y += 22f;
 
-        var color = RunRecorder.Self.Color;
+        var color = colorOwner.Color;
         string[] labels = { "R", "G", "B" };
         Color[] channelColors =
         {

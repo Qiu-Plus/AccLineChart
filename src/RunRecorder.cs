@@ -586,12 +586,10 @@ internal static class RunRecorder
         }
     }
 
-    /// <summary>Creates demo data so the window can be previewed from the menu.</summary>
-    internal static void FillDebugData()
+    /// <summary>Builds synthetic samples for the F9 preview. Never touches the live run data.</summary>
+    internal static PlayerSeries CreateDebugSeries()
     {
-        _series.Clear();
         var self = new PlayerSeries { Name = "你", IsSelf = true, Color = SettingManager.OwnLineColor };
-        _series.Add(self);
 
         var rnd = new System.Random(20261122);
         int perfect = 0, great = 0, miss = 0;
@@ -630,9 +628,6 @@ internal static class RunRecorder
             });
         }
 
-        ChartName = "";
-        // Preview data must not enter the live recording loop: Poll() sees timeFromMusicStart=0
-        // on the menu and would think the run restarted (Begin() hides the window in the same frame).
-        InGame = false;
+        return self;
     }
 }

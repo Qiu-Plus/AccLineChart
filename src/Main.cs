@@ -7,6 +7,10 @@ internal class Main : MelonMod
         SettingManager.Register();
 
         HarmonyInstance.PatchAll(typeof(Main).Assembly);
+        if (SettingManager.DebugLog)
+        {
+            LoggerInstance.Msg($"[main] harmony patches applied: {HarmonyInstance.GetPatchedMethods().Count()} methods");
+        }
         MelonEvents.OnGUI.Subscribe(ChartWindow.OnGUI);
 
         MultiplayerTap.Start();
@@ -83,6 +87,9 @@ internal class Main : MelonMod
             RunRecorder.Poll();
             MultiplayerTap.Pump();
             MultiplayerRecorder.Poll();
+            ChartWindow.UpdatePointerState();
+            InputGuard.SuppressScroll = ChartWindow.PointerOverWindow;
+            UiInputBlocker.Tick();
 
             // After a multiplayer round, show the chart automatically once we are back in a menu.
             if (MultiplayerRecorder.PendingAutoShow && !RunRecorder.InGame && _mpShowAt < 0f)
